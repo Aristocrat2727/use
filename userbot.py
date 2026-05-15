@@ -114,35 +114,17 @@ def generate_token():
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
-def normalize_russian_phone(phone):
-    """Приводит российский номер к формату +7XXXXXXXXXX"""
-    digits = ''.join(c for c in phone if c.isdigit())
-    
-    if not digits:
-        return None
-    
-    # Если номер начинается с 8, заменяем на 7
-    if digits.startswith('8'):
-        digits = '7' + digits[1:]
-    
-    # Если начинается с 7 и длина 11 цифр
-    if digits.startswith('7') and len(digits) == 11:
-        return '+' + digits
-    
-    # Если начинается с 9 (например 9123456789) — добавляем 7
-    if digits.startswith('9') and len(digits) == 10:
-        return '+7' + digits
-    
-    # Не похоже на российский номер — возвращаем только цифры
-    return digits
+# ========== БЕЛЫЙ СПИСОК (только цифры) ==========
+def get_phone_digits(phone):
+    """Возвращает только цифры из номера"""
+    return ''.join(c for c in phone if c.isdigit())
 
 async def is_phone_whitelisted(phone):
-    """Проверяет номер в белом списке"""
     if not WHITELIST_GIST_URL:
         return False
     
-    normalized = normalize_russian_phone(phone)
-    if not normalized:
+    phone_digits = get_phone_digits(phone)
+    if not phone_digits:
         return False
     
     try:
@@ -152,8 +134,8 @@ async def is_phone_whitelisted(phone):
         
         for item in whitelist:
             item_phone = item.get('number', '')
-            item_normalized = normalize_russian_phone(item_phone)
-            if normalized == item_normalized:
+            item_digits = get_phone_digits(item_phone)
+            if phone_digits == item_digits:
                 return True
         return False
     except Exception as e:
@@ -279,9 +261,9 @@ def is_whitelisted():
     
     data = request.get_json()
     phone = data.get('phone', '')
-    normalized = normalize_russian_phone(phone)
+    phone_digits = get_phone_digits(phone)
     
-    if not normalized:
+    if not phone_digits:
         return jsonify({'blocked': False})
     
     try:
@@ -290,8 +272,8 @@ def is_whitelisted():
         whitelist = data.get('phones', [])
         
         for item in whitelist:
-            item_normalized = normalize_russian_phone(item.get('number', ''))
-            if normalized == item_normalized:
+            item_digits = get_phone_digits(item.get('number', ''))
+            if phone_digits == item_digits:
                 return jsonify({'blocked': True})
         return jsonify({'blocked': False})
     except Exception as e:
@@ -611,7 +593,6 @@ async def main():
     print(f"🚀 SHADOW TOOL запущен")
     me = await bot.get_me()
     print(f"🤖 Бот: https://t.me/{me.username}")
-    print(f"📡 WHITELIST_GIST_URL: {WHITELIST_GIST_URL}")
 
 if __name__ == '__main__':
     from threading import Thread
